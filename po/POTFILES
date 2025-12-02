@@ -1,0 +1,7 @@
+data/com.example.TextViewer.desktop.in
+data/com.example.TextViewer.appdata.xml.in
+data/com.example.TextViewer.gschema.xml
+src/window.ui
+src/main.py
+src/window.py
+
