@@ -1,4 +1,4 @@
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Gio, GLib, Gtk, GtkSource
 
 
 @Gtk.Template(resource_path='/com/example/TextViewer/window.ui')
@@ -24,13 +24,62 @@ class TextViewerWindow(Gtk.ApplicationWindow):
         buffer = self.main_text_view.get_buffer()
         buffer.connect("notify::cursor-position", self.update_cursor_position)
 
+        # Store language and style scheme managers for later use
+        self.language_manager = GtkSource.LanguageManager.get_default()
+        self.style_scheme_manager = GtkSource.StyleSchemeManager.get_default()
+        
+        # Set up initial style scheme based on dark mode
         self.settings = Gio.Settings(schema_id="com.example.TextViewer")
+        self.update_style_scheme()
+        
+        # Connect to dark mode changes
+        self.settings.connect("changed::dark-mode", self.on_dark_mode_changed)
+        
         self.settings.bind("window-width", self, "default-width",
                            Gio.SettingsBindFlags.DEFAULT)
         self.settings.bind("window-height", self, "default-height",
                            Gio.SettingsBindFlags.DEFAULT)
         self.settings.bind("window-maximized", self, "maximized",
                            Gio.SettingsBindFlags.DEFAULT)
+        
+        # Store current file for language detection
+        self.current_file = None
+        
+        # Toast message queue
+        self._toast_timeout = None
+
+    def update_style_scheme(self):
+        """Update the style scheme based on current dark mode setting."""
+        buffer = self.main_text_view.get_buffer()
+        dark_mode = self.settings.get_boolean("dark-mode")
+        if dark_mode:
+            scheme = self.style_scheme_manager.get_scheme('Adwaita-dark')
+        else:
+            scheme = self.style_scheme_manager.get_scheme('Adwaita')
+        if scheme:
+            buffer.set_style_scheme(scheme)
+    
+    def on_dark_mode_changed(self, settings, key):
+        """Called when dark mode setting changes."""
+        self.update_style_scheme()
+    
+    def detect_language(self, file):
+        """Detect and set the language based on file extension."""
+        buffer = self.main_text_view.get_buffer()
+        if file:
+            # Get file extension
+            basename = file.get_basename()
+            if basename:
+                # Try to guess language from filename
+                language = self.language_manager.guess_language(basename, None)
+                if language:
+                    buffer.set_language(language)
+                else:
+                    buffer.set_language(None)
+            else:
+                buffer.set_language(None)
+        else:
+            buffer.set_language(None)
 
     def update_cursor_position(self, buffer, _):
         # Retrieve the value of the "cursor-position" property
@@ -41,6 +90,52 @@ class TextViewerWindow(Gtk.ApplicationWindow):
         column = iter.get_line_offset() + 1
         # Set the new contents of the label
         self.cursor_pos.set_text(f"Ln {line}, Col {column}")
+
+    def show_toast(self, message):
+        """Show a toast notification message."""
+        # Remove existing toast if any
+        if self._toast_timeout:
+            GLib.source_remove(self._toast_timeout)
+            self._toast_timeout = None
+        
+        # Remove existing toast widget
+        for child in self.toast_overlay.get_children():
+            if child != self.toast_overlay.get_child():
+                self.toast_overlay.remove(child)
+        
+        # Create toast widget
+        toast_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        toast_box.set_margin_top(12)
+        toast_box.set_margin_bottom(12)
+        toast_box.set_margin_start(12)
+        toast_box.set_margin_end(12)
+        toast_box.add_css_class("toast")
+        
+        label = Gtk.Label(label=message)
+        label.set_hexpand(True)
+        label.set_halign(Gtk.Align.START)
+        toast_box.append(label)
+        
+        revealer = Gtk.Revealer()
+        revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
+        revealer.set_transition_duration(200)
+        revealer.set_child(toast_box)
+        revealer.set_halign(Gtk.Align.CENTER)
+        revealer.set_valign(Gtk.Align.END)
+        revealer.set_vexpand(False)
+        revealer.set_hexpand(False)
+        
+        self.toast_overlay.add_overlay(revealer)
+        revealer.set_reveal_child(True)
+        
+        # Auto-hide after 3 seconds
+        def hide_toast():
+            revealer.set_reveal_child(False)
+            GLib.timeout_add(300, lambda: self.toast_overlay.remove(revealer))
+            self._toast_timeout = None
+            return False
+        
+        self._toast_timeout = GLib.timeout_add(3000, hide_toast)
 
     def open_file_dialog(self, action, _):
         # Create a new file selection dialog, using the "open" mode
@@ -82,13 +177,13 @@ class TextViewerWindow(Gtk.ApplicationWindow):
 
         # In case of error, show a toast
         if not contents[0]:
-            self.toast_overlay.add_toast(Adw.Toast(title=f"Unable to open “{display_name}”"))
+            self.show_toast(f"Unable to open “{display_name}”")
             return
 
         try:
             text = contents[1].decode('utf-8')
         except UnicodeError as err:
-            self.toast_overlay.add_toast(Adw.Toast(title=f"Invalid text encoding for “{display_name}”"))
+            self.show_toast(f"Invalid text encoding for “{display_name}”")
             return
 
         buffer = self.main_text_view.get_buffer()
@@ -96,10 +191,14 @@ class TextViewerWindow(Gtk.ApplicationWindow):
         start = buffer.get_start_iter()
         buffer.place_cursor(start)
 
+        # Detect and set language based on file
+        self.current_file = file
+        self.detect_language(file)
+
         self.set_title(display_name)
 
         # Show a toast for the successful loading
-        self.toast_overlay.add_toast(Adw.Toast(title=f"Opened “{display_name}”"))
+        self.show_toast(f"Opened “{display_name}”")
 
     def save_file_dialog(self, action, _):
         self._native = Gtk.FileChooserNative(
@@ -153,8 +252,8 @@ class TextViewerWindow(Gtk.ApplicationWindow):
         if not res:
             msg = f"Unable to save as “{display_name}”"
         else:
-            msg = f"Saves as “{display_name}”"
-        self.toast_overlay.add_toast(Adw.Toast(title=msg))
+            msg = f"Saved as “{display_name}”"
+        self.show_toast(msg)
 
 
 class AboutDialog(Gtk.AboutDialog):

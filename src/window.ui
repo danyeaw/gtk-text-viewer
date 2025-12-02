@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
   <requires lib="gtk" version="4.0"/>
+  <requires lib="gtksourceview" version="5.0"/>
   <template class="TextViewerWindow" parent="GtkApplicationWindow">
     <property name="default-width">600</property>
     <property name="default-height">300</property>
@@ -34,7 +35,7 @@
       </object>
     </child>
     <child>
-      <object class="AdwToastOverlay" id="toast_overlay">
+      <object class="GtkOverlay" id="toast_overlay">
         <property name="child">
           <object class="GtkScrolledWindow">
             <property name="hexpand">true</property>
@@ -44,8 +45,10 @@
             <property name="margin-start">6</property>
             <property name="margin-end">6</property>
             <property name="child">
-              <object class="GtkTextView" id="main_text_view">
+              <object class="GtkSourceView" id="main_text_view">
                 <property name="monospace">true</property>
+                <property name="show-line-numbers">true</property>
+                <property name="auto-indent">true</property>
               </object>
             </property>
           </object>
