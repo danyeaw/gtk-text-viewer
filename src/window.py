@@ -13,6 +13,19 @@ class TextViewerWindow(Gtk.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        css_provider = Gtk.CssProvider()
+        css = b"""
+        textview {
+            font-size: 14pt;
+        }
+        """
+        css_provider.load_from_data(css, -1)
+        Gtk.StyleContext.add_provider_for_display(
+            self.get_display(),
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
         open_action = Gio.SimpleAction(name="open")
         open_action.connect("activate", self.open_file_dialog)
         self.add_action(open_action)
@@ -47,6 +60,7 @@ class TextViewerWindow(Gtk.ApplicationWindow):
         
         # Toast message queue
         self._toast_timeout = None
+        self._toast_revealer = None
 
     def update_style_scheme(self):
         """Update the style scheme based on current dark mode setting."""
@@ -99,9 +113,9 @@ class TextViewerWindow(Gtk.ApplicationWindow):
             self._toast_timeout = None
         
         # Remove existing toast widget
-        for child in self.toast_overlay.get_children():
-            if child != self.toast_overlay.get_child():
-                self.toast_overlay.remove(child)
+        if self._toast_revealer:
+            self.toast_overlay.remove(self._toast_revealer)
+            self._toast_revealer = None
         
         # Create toast widget
         toast_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
@@ -127,12 +141,18 @@ class TextViewerWindow(Gtk.ApplicationWindow):
         
         self.toast_overlay.add_overlay(revealer)
         revealer.set_reveal_child(True)
+        self._toast_revealer = revealer
         
         # Auto-hide after 3 seconds
         def hide_toast():
             revealer.set_reveal_child(False)
-            GLib.timeout_add(300, lambda: self.toast_overlay.remove(revealer))
-            self._toast_timeout = None
+            def remove_toast():
+                if self._toast_revealer == revealer:
+                    self.toast_overlay.remove(revealer)
+                    self._toast_revealer = None
+                self._toast_timeout = None
+                return False
+            GLib.timeout_add(300, remove_toast)
             return False
         
         self._toast_timeout = GLib.timeout_add(3000, hide_toast)
